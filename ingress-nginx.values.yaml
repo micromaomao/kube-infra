@@ -1,0 +1,6 @@
+controller:
+  kind: DaemonSet
+  hostPort:
+    enabled: true
+  extraArgs:
+    default-ssl-certificate: "default/main-ingress-cert"

@@ -1,0 +1,43 @@
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    email: m@maowtm.org
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: le-issuer-account-key-staging
+    solvers:
+    - dns01:
+        cloudflare:
+          email: m@maowtm.org
+          apiTokenSecretRef:
+            name: cloudflare-apikey
+            key: apikey
+      selector:
+        dnsZones:
+        - 'maowtm.org'
+
+---
+
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-production
+spec:
+  acme:
+    email: m@maowtm.org
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: le-issuer-account-key-prod
+    solvers:
+    - dns01:
+        cloudflare:
+          email: m@maowtm.org
+          apiTokenSecretRef:
+            name: cloudflare-apikey
+            key: apikey
+      selector:
+        dnsZones:
+        - 'maowtm.org'
