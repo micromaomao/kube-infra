@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: test
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-pod
+  namespace: test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test
+  template:
+    metadata:
+      labels:
+        app: test
+    spec:
+      serviceAccountName: test-pod
+      containers:
+        - name: test-pod
+          image: "registry.digitalocean.com/maowtm-images/kube-tester:latest"
+          resources:
+            requests:
+              cpu: 5m
+              memory: 50M
+            limits:
+              memory: 150M
+              cpu: 500m
+          command: ["sleep", "infinity"]
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: test-pod
+  namespace: test
+imagePullSecrets:
+  - name: maowtm-images
