@@ -4,3 +4,8 @@ controller:
     enabled: true
   extraArgs:
     default-ssl-certificate: "default/main-ingress-cert"
+  config:
+    hsts: "true"
+    hsts-include-subdomains: "true"
+    hsts-preload: "true"
+    use-geoip: "false"
