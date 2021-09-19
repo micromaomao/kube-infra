@@ -1,24 +1,25 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
-	"strings"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
 	yaml "gopkg.in/yaml.v3"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	apply "k8s.io/client-go/applyconfigurations/core/v1"
-	applymeta "k8s.io/client-go/applyconfigurations/meta/v1"
+	v1__ "k8s.io/api/core/v1"
+	v1___ "k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/client-go/applyconfigurations/core/v1"
+	v1_ "k8s.io/client-go/applyconfigurations/meta/v1"
+	"k8s.io/client-go/informers"
 	k "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 )
+
+const API_GROUP = "maowtm.org/kube-secret-copy"
 
 func MakeKubeClient(kubeconfig *string) *k.Clientset {
 	cfg, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
@@ -26,6 +27,29 @@ func MakeKubeClient(kubeconfig *string) *k.Clientset {
 		log.Fatalln("Unable to build kube config: ", err)
 	}
 	return k.NewForConfigOrDie(cfg)
+}
+
+func loadConfig(configFilePath string) (config *Config) {
+	configData, err := ioutil.ReadFile(configFilePath)
+	if err != nil {
+		log.Fatalf("Unable to read config file: %s\n", err.Error())
+		return
+	}
+	config = &Config{}
+	err = yaml.Unmarshal(configData, config)
+	if err != nil {
+		log.Fatalf("Invalid config file: %s\n", err.Error())
+		return
+	}
+	if config.Namespace == "" {
+		log.Fatalln("namespace required in config.")
+		return
+	}
+	if config.CopyMap == nil {
+		log.Fatalln("copyMap required in config.")
+		return
+	}
+	return
 }
 
 type Config struct {
@@ -40,123 +64,72 @@ func main() {
 	if *configFile == "" {
 		log.Fatalln("Required -config value")
 	}
-	var configData []byte
-	var config Config
-	loadConfig := func() (err error, changed bool) {
-		newConfigData, err := ioutil.ReadFile(*configFile)
-		if err != nil {
-			err = errors.New("Unable to read config file: " + err.Error())
-			return
-		}
-		if configData == nil || !bytes.Equal(configData, newConfigData) {
-			log.Println("Reloaded config.")
-			configData = newConfigData
-			changed = true
-		} else {
-			return
-		}
-		config = Config{}
-		err = yaml.Unmarshal(configData, &config)
-		if err != nil {
-			err = errors.New("Invalid config file: " + err.Error())
-			return
-		}
-		if config.Namespace == "" {
-			err = errors.New("namespace required in config.")
-			return
-		}
-		if config.CopyMap == nil {
-			err = errors.New("copyMap required in config.")
-			return
-		}
-		return
-	}
-	err, _ := loadConfig()
-	if err != nil {
-		log.Fatalln("Error reading config: ", err)
-	}
+	config := loadConfig(*configFile)
 	client := MakeKubeClient(kubeconfig)
 	ctx := context.Background()
-	watch, err := client.CoreV1().Secrets(config.Namespace).Watch(ctx, v1.ListOptions{})
-	if err != nil {
-		log.Fatalln("Failed to watch secrets: ", err)
-	}
-	watchChan := watch.ResultChan()
-	timer := time.NewTicker(time.Minute)
-	defer timer.Stop()
-	configWatcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		log.Println("Warning: unable to create file watcher. Will not reload config.")
-		configWatcher = nil
-	} else {
-		configWatcher.Add(*configFile)
-		defer configWatcher.Close()
-	}
-	update := func() {
-		copyMap := *config.CopyMap
-		res, err := client.CoreV1().Secrets(config.Namespace).List(ctx, v1.ListOptions{})
+	sourceSecretInformer := informers.NewSharedInformerFactoryWithOptions(client, time.Minute, informers.WithNamespace(config.Namespace)).Core().V1().Secrets().Informer()
+	deleteFunc := func(name string, targetNamespace string) {
+		err := client.CoreV1().Secrets(targetNamespace).Delete(ctx, name, v1___.DeleteOptions{})
 		if err != nil {
-			log.Fatalln("Unable to list secrets: ", err.Error())
+			panic(fmt.Errorf("Unable to delete %s/%s: %w", targetNamespace, name, err))
 		}
-		unprocessed := make(map[string]string)
-		for n, t := range copyMap {
-			unprocessed[n] = t
+		fmt.Printf("Deleted %s/%s\n", targetNamespace, name)
+	}
+	copyFunc := func(oldObj *v1__.Secret, newObj *v1__.Secret) {
+		if newObj == nil {
+			if targetNamespace, ok := (*config.CopyMap)[oldObj.Name]; ok {
+				deleteFunc(oldObj.Name, targetNamespace)
+			}
+			return
 		}
-		for _, r := range res.Items {
-			name := r.Name
-			targetNamespace, exists := copyMap[name]
-			if !exists {
-				continue
-			}
-			delete(unprocessed, name)
-			_, err = client.CoreV1().Secrets(targetNamespace).Apply(ctx, &apply.SecretApplyConfiguration{
-				TypeMetaApplyConfiguration: applymeta.TypeMetaApplyConfiguration{
-					Kind:       &[]string{"Secret"}[0],
-					APIVersion: &[]string{"v1"}[0],
-				},
-				ObjectMetaApplyConfiguration: &applymeta.ObjectMetaApplyConfiguration{
-					Name: &r.Name,
-				},
-				Data: r.Data,
-			}, v1.ApplyOptions{
-				FieldManager: "maowtm.org/kube-secret-copy",
-			})
-			if err != nil {
-				panic(errors.New(fmt.Sprintf("Unable to apply %s: %s", r.Name, err.Error())))
-			}
-			log.Printf("Synced %s -> %s\n", r.Name, targetNamespace)
+		if oldObj != nil && oldObj.Name != newObj.Name {
+			panic("Name change not possible")
 		}
-		for name, targetNamespace := range unprocessed {
-			err := client.CoreV1().Secrets(targetNamespace).Delete(ctx, name, v1.DeleteOptions{})
-			if err != nil && !strings.Contains(err.Error(), "not found") {
-				log.Fatalf("Unable to delete %s in %s: %s\n", name, targetNamespace, err.Error())
-			}
-			if err == nil {
-				log.Printf("Deleted %s (%s)\n", name, targetNamespace)
+		name := newObj.Name
+		targetNamespace, ok := (*config.CopyMap)[name]
+		if !ok {
+			return
+		}
+		annotations := make(map[string]string)
+		annotations[API_GROUP] = "true"
+		_, err := client.CoreV1().Secrets(targetNamespace).Apply(ctx, &v1.SecretApplyConfiguration{
+			TypeMetaApplyConfiguration: v1_.TypeMetaApplyConfiguration{
+				Kind:       &[]string{"Secret"}[0],
+				APIVersion: &[]string{"v1"}[0],
+			},
+			ObjectMetaApplyConfiguration: &v1_.ObjectMetaApplyConfiguration{
+				Name:        &name,
+				Annotations: annotations,
+			},
+			Data: newObj.Data,
+			Type: &newObj.Type,
+		}, v1___.ApplyOptions{
+			FieldManager: API_GROUP,
+		})
+		if err != nil {
+			panic(fmt.Errorf("Unable to apply %s: %w", name, err))
+		}
+		log.Printf("Synced %s -> %s\n", name, targetNamespace)
+
+	}
+	sourceSecretInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			copyFunc(nil, obj.(*v1__.Secret))
+		},
+		UpdateFunc: func(old interface{}, newobj interface{}) {
+			if old == nil {
+				copyFunc(nil, newobj.(*v1__.Secret))
 			} else {
-				log.Printf("%s does not exist in either %s or %s\n", name, config.Namespace, targetNamespace)
+				copyFunc(old.(*v1__.Secret), newobj.(*v1__.Secret))
 			}
-		}
-		log.Println("Sync finished.")
-	}
-	update()
-	configWatcherChan := make(chan fsnotify.Event)
-	if configWatcher != nil {
-		configWatcherChan = configWatcher.Events
-	}
-	for {
-		select {
-		case <-watchChan:
-			update()
-		case <-timer.C:
-			update()
-		case <-configWatcherChan:
-			err, changed := loadConfig()
-			if err != nil {
-				log.Printf("Warning: failed to reload config file: %s\n", err.Error())
-			} else if changed {
-				update()
+		},
+		DeleteFunc: func(obj interface{}) {
+			if dfs, ok := obj.(cache.DeletedFinalStateUnknown); ok {
+				copyFunc(dfs.Obj.(*v1__.Secret), nil)
+			} else {
+				copyFunc(obj.(*v1__.Secret), nil)
 			}
-		}
-	}
+		},
+	})
+	sourceSecretInformer.Run(ctx.Done())
 }
