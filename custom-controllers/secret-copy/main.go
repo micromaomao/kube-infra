@@ -90,8 +90,8 @@ func main() {
 		if !ok {
 			return
 		}
-		annotations := make(map[string]string)
-		annotations[API_GROUP] = "true"
+		labels := make(map[string]string)
+		labels[API_GROUP] = "true"
 		_, err := client.CoreV1().Secrets(targetNamespace).Apply(ctx, &v1.SecretApplyConfiguration{
 			TypeMetaApplyConfiguration: v1_.TypeMetaApplyConfiguration{
 				Kind:       &[]string{"Secret"}[0],
@@ -99,7 +99,7 @@ func main() {
 			},
 			ObjectMetaApplyConfiguration: &v1_.ObjectMetaApplyConfiguration{
 				Name:        &name,
-				Annotations: annotations,
+				Labels: labels,
 			},
 			Data: newObj.Data,
 			Type: &newObj.Type,
