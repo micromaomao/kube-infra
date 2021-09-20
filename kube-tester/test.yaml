@@ -22,7 +22,7 @@ spec:
       serviceAccountName: test-pod
       containers:
         - name: test-pod
-          image: "registry.digitalocean.com/maowtm-images/kube-tester:latest"
+          image: "ghcr.io/micromaomao/kube-tester:latest"
           resources:
             requests:
               cpu: 5m
@@ -38,5 +38,3 @@ kind: ServiceAccount
 metadata:
   name: test-pod
   namespace: test
-imagePullSecrets:
-  - name: maowtm-images

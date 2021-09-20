@@ -25,7 +25,7 @@ spec:
     spec:
       containers:
       - name: app
-        image: registry.digitalocean.com/maowtm-images/bellclone-server:latest
+        image: ghcr.io/micromaomao/bellclone-ws:latest
         ports:
         - name: ws
           containerPort: 5000
@@ -33,5 +33,3 @@ spec:
           requests:
             cpu: 5m
             memory: 5Mi
-      imagePullSecrets:
-      - name: maowtm-images
