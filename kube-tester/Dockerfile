@@ -5,3 +5,4 @@ RUN apt update -y && apt install curl -y && \
     chmod +x /usr/bin/kubectl && \
     echo 'alias k=kubectl' > /root/.bashrc
 ENTRYPOINT [ "bash" ]
+LABEL org.opencontainers.image.source="https://github.com/micromaomao/kube-infra"
