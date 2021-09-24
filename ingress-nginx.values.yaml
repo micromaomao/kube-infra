@@ -1,7 +1,16 @@
+# Bind port 80 and 443 on the nodes themselves, have DNS point directly to nodes.
+# This gets rid of the need for any cloud balancer, which cost money.
+
 controller:
   kind: DaemonSet
+  # There is actually no need for the service, except that without it it
+  # crashes, so we leave it enabled (but not a loadbalancer, since this would
+  # create the cloud balancer).
+  service:
+    type: ClusterIP
   hostPort:
     enabled: true
+
   extraArgs:
     default-ssl-certificate: "default/main-ingress-cert"
   config:
